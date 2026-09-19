@@ -14,6 +14,8 @@
  * URL-only by design. There is no GitHub path here — the engine has none.
  */
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
+import { readFile } from 'node:fs/promises';
+import { join, normalize, extname } from 'node:path';
 import { checkRobots } from '../src/crawlers/robotsParser.js';
 import { checkUaDiff } from '../src/crawlers/uaDiffChecker.js';
 import { checkRenderingGap } from '../src/crawlers/renderingGapScorer.js';
@@ -24,10 +26,40 @@ import { generateAiBotRobots } from '../src/generators/configGenerator.js';
 import { DELIVERY_MODES, type DeliveryMode } from '../src/mode.js';
 import type { CheckOutcome, DiagnosticReport } from '../src/crawlers/types.js';
 
-// Hosts like Render inject PORT and require binding 0.0.0.0. Locally this still defaults to
-// 127.0.0.1:8787, which is where the Vite dev proxy expects the bridge.
+// Render (and most hosts) inject PORT and require binding 0.0.0.0. Falls back to
+// 8787 locally, where `npm run dev` (Vite) proxies /api here.
 const PORT = Number(process.env.PORT ?? process.env.APERTURE_BRIDGE_PORT ?? 8787);
-const HOST = process.env.HOST ?? (process.env.PORT ? '0.0.0.0' : '127.0.0.1');
+const HOST = process.env.HOST ?? '0.0.0.0';
+
+// The built front end. In production this same service serves the SPA and /api
+// from one origin, so the app's relative /api calls just work (no CORS, no second host).
+const DIST = join(process.cwd(), 'dist');
+const MIME: Record<string, string> = {
+  '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8',
+  '.json': 'application/json; charset=utf-8', '.map': 'application/json; charset=utf-8', '.svg': 'image/svg+xml',
+  '.mp4': 'video/mp4', '.otf': 'font/otf', '.ttf': 'font/ttf', '.woff': 'font/woff', '.woff2': 'font/woff2',
+  '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.ico': 'image/x-icon', '.txt': 'text/plain; charset=utf-8',
+};
+
+/** Serve a built asset, falling back to index.html for client-side routes (SPA). */
+async function serveStatic(res: ServerResponse, pathname: string): Promise<void> {
+  const rel = normalize(decodeURIComponent(pathname)).replace(/^([/\\]|\.\.[/\\])+/, '');
+  const candidate = join(DIST, rel || 'index.html');
+  const filePath = candidate.startsWith(DIST) ? candidate : join(DIST, 'index.html');
+  try {
+    const body = await readFile(filePath);
+    res.writeHead(200, { 'content-type': MIME[extname(filePath)] ?? 'application/octet-stream' });
+    res.end(body);
+  } catch {
+    try {
+      const index = await readFile(join(DIST, 'index.html'));
+      res.writeHead(200, { 'content-type': MIME['.html'] });
+      res.end(index);
+    } catch {
+      sendJson(res, 404, { error: 'not found (build the front end with `npm run build`)' });
+    }
+  }
+}
 
 /** Same failure isolation as runDiagnostics: one check failing becomes `{ ok:false }`, never a dead scan. */
 async function settle<T>(work: Promise<T>): Promise<CheckOutcome<T>> {
@@ -148,9 +180,15 @@ const server = createServer(async (req, res) => {
     return;
   }
 
+  // Anything that isn't an API call is a request for the front end.
+  if (method === 'GET' && !url.pathname.startsWith('/api/')) {
+    await serveStatic(res, url.pathname);
+    return;
+  }
+
   sendJson(res, 404, { error: 'not found' });
 });
 
 server.listen(PORT, HOST, () => {
-  console.log(`Aperture bridge listening on http://${HOST}:${PORT}  (POST /api/scan, GET /api/robots?mode=)`);
+  console.log(`Aperture bridge listening on http://${HOST}:${PORT}  (SPA + POST /api/scan, GET /api/robots?mode=)`);
 });
