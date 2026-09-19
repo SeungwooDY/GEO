@@ -11,3 +11,7 @@ yarn-error.log*
 # engine runtime artifacts
 snapshots/
 data/
+
+# GitHub App secrets and local run state
+.env
+*.pem
