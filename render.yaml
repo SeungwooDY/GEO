@@ -1,0 +1,19 @@
+# Render Blueprint — single Web Service that serves the built SPA and /api.
+# The engine runs headless Chromium (Playwright), so this must be a Web Service,
+# not a Static Site, and needs enough memory for a browser (avoid the 512MB tiers).
+services:
+  - type: web
+    name: aperture
+    runtime: node
+    plan: standard # Chromium needs RAM; free/starter (512MB) will OOM on render/per-bot checks
+    # Install deps, fetch Chromium into node_modules (see PLAYWRIGHT_BROWSERS_PATH), then build the SPA.
+    buildCommand: npm install && npx playwright install chromium && npm run build
+    startCommand: npm start
+    healthCheckPath: /api/robots?mode=mirror
+    envVars:
+      - key: NODE_VERSION
+        value: "20"
+      # Install browsers under node_modules so they ship with the deploy (Render's
+      # native runtime doesn't persist the default ~/.cache/ms-playwright).
+      - key: PLAYWRIGHT_BROWSERS_PATH
+        value: "0"
