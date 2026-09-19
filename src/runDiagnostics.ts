@@ -55,9 +55,12 @@ function printReport(report: DiagnosticReport): void {
       );
     } else {
       for (const b of ua.perBot) {
-        const flag = b.blocked ? 'BLOCKED ' : b.substanceMismatch ? 'MISMATCH' : 'OK      ';
+        const flag = b.challenged ? 'INDETERM' : b.blocked ? 'BLOCKED ' : b.substanceMismatch ? 'MISMATCH' : 'OK      ';
+        const note = b.challenged
+          ? ` — ${b.challengedBy ?? 'WAF'} challenged our unverified probe; real-crawler access unknowable from outside`
+          : '';
         console.log(
-          `  ${flag} ${b.bot.padEnd(16)} status=${b.statusCode ?? 'ERR'} bytes=${b.contentLength}${b.error ? ` error=${b.error}` : ''}`,
+          `  ${flag} ${b.bot.padEnd(16)} status=${b.statusCode ?? 'ERR'} bytes=${b.contentLength}${b.error ? ` error=${b.error}` : ''}${note}`,
         );
       }
     }
