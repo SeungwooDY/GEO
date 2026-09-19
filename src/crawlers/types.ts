@@ -39,6 +39,23 @@ export interface RenderingGapReport {
   jsDependent: boolean;
 }
 
+export interface PerBotSignalResult {
+  bot: string;
+  statusCode: number | null;
+  fetchUsable: boolean;
+  schemaTypes: string[];
+  schemaCompletenessPercent: number;
+  wordCount: number;
+  /** Human-readable differences from the browser-UA view; empty when identical (or not comparable). */
+  differences: string[];
+  error: string | null;
+}
+
+export interface PerBotSignalsReport {
+  baselineUsable: boolean;
+  perBot: PerBotSignalResult[];
+}
+
 export type CheckOutcome<T> = { ok: true; data: T } | { ok: false; error: string };
 
 export interface SchemaReport {
@@ -48,6 +65,30 @@ export interface SchemaReport {
   found: boolean;
   types: string[];
   blockCount: number;
+  /** Which local-business fields appear anywhere in the JSON-LD; percent = present / total tracked. */
+  fieldCompleteness: { present: string[]; missing: string[]; percent: number };
+  /** Phone number from schema, and whether its digits appear in the page's visible text (NAP agreement). */
+  telephone: string | null;
+  telephoneInVisibleText: boolean | null;
+}
+
+export interface ContentSignalsReport {
+  fetchUsable: boolean;
+  statusCode: number;
+  responseTimeMs: number;
+  htmlBytes: number;
+  wordCount: number;
+  textToHtmlRatio: number;
+  h1Count: number;
+  h2Count: number;
+  h3Count: number;
+  /** Heuristic count of percentages, dollar amounts and unit-bearing numbers in visible text. */
+  statCount: number;
+  quoteCount: number;
+  /** Distinct external hostnames linked from the page (proxy for cited sources). */
+  outboundLinkHosts: number;
+  questionHeadings: number;
+  lastModifiedHeader: string | null;
 }
 
 export interface DiagnosticReport {
@@ -56,4 +97,6 @@ export interface DiagnosticReport {
   uaDiff: CheckOutcome<UaDiffReport>;
   renderingGap: CheckOutcome<RenderingGapReport>;
   schema: CheckOutcome<SchemaReport>;
+  content: CheckOutcome<ContentSignalsReport>;
+  perBotSignals: CheckOutcome<PerBotSignalsReport>;
 }

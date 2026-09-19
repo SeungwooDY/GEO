@@ -1,4 +1,4 @@
-import { AI_BOTS, BROWSER_USER_AGENT } from './botUserAgents.js';
+import { AI_BOTS, BROWSER_USER_AGENT, fetchableBots } from './botUserAgents.js';
 import { extractVisibleText, hashText } from './htmlText.js';
 import type { UaDiffReport, UaDiffResult } from './types.js';
 
@@ -19,7 +19,7 @@ export async function checkUaDiff(url: string): Promise<UaDiffReport> {
   const baselineUsable = baselineRaw.statusCode === 200 && baselineText.length > 0;
 
   const perBot: UaDiffResult[] = await Promise.all(
-    AI_BOTS.map(async (bot): Promise<UaDiffResult> => {
+    fetchableBots(AI_BOTS).map(async (bot): Promise<UaDiffResult> => {
       try {
         const { statusCode, body } = await fetchAs(url, bot.userAgent);
         const text = extractVisibleText(body);

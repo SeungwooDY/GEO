@@ -4,7 +4,11 @@ export interface BotDefinition {
   /** Real UA string the bot sends, used for the UA-diff / cloaking check */
   userAgent: string;
   vendor: string;
+  /** True for robots.txt-only policy tokens that never make requests, so there's nothing to fetch as. */
+  tokenOnly?: boolean;
 }
+
+export const fetchableBots = (bots: BotDefinition[]) => bots.filter((b) => !b.tokenOnly);
 
 // UA strings as published by each vendor's crawler documentation.
 export const AI_BOTS: BotDefinition[] = [
@@ -43,6 +47,7 @@ export const AI_BOTS: BotDefinition[] = [
     token: 'Google-Extended',
     userAgent: 'Mozilla/5.0 (compatible; Google-Extended)',
     vendor: 'Google',
+    tokenOnly: true,
   },
 ];
 
