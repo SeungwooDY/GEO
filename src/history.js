@@ -9,7 +9,7 @@ export function getHistory() {
 
 export function recordScan(value, mode) {
   if (!value) return
-  const { score, grade } = computeGeoScore(sampleReport(value))
+  const { score, grade } = computeGeoScore(sampleReport(value), mode)
   let list = getHistory().filter((e) => e.value !== value)
   list.unshift({ value, mode, score, grade, ts: Date.now() })
   list = list.slice(0, 24)

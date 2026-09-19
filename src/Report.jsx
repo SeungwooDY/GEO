@@ -80,7 +80,7 @@ export default function Report({ url, mode, onBack }) {
     )
   }
 
-  const { score, grade, factors } = computeGeoScore(report)
+  const { score, grade, factors, title, aim } = computeGeoScore(report, mode)
   const robots = report.robots
   const ua = report.uaDiff
   const rg = report.renderingGap
@@ -96,7 +96,7 @@ export default function Report({ url, mode, onBack }) {
       <section className="hreport" ref={scrollerRef}>
 
         {/* 01 SCORE */}
-        <Panel idx="01" title="GEO Score">
+        <Panel idx="01" title={title}>
           <div className="score-row">
             <div>
               <div className="score-big">{score}</div>
@@ -106,14 +106,15 @@ export default function Report({ url, mode, onBack }) {
             <div className="factors">
               {factors.map((f) => (
                 <div className="factor" key={f.key}>
-                  <span>{f.label}</span>
+                  <span>{f.label}{f.dir < 0 ? ' ↓' : ''}</span>
                   <span className="bar"><i style={{ width: `${Math.round(f.pct * 100)}%` }} /></span>
                   <span className="note">{f.note}</span>
                 </div>
               ))}
             </div>
           </div>
-          <p className="dnote" style={{ marginTop: 16 }}>Scored on what a URL scan can prove — crawler access, extractability, structured data. Freshness &amp; crawl traffic need Aperture in front of the site.</p>
+          <p className="dnote" style={{ marginTop: 16 }}>{aim}</p>
+          <p className="dnote">Deterministic, from the crawler tests below. Signals that came back inconclusive are dropped, not penalized. {factors.some((f) => f.dir < 0) ? '↓ = lower exposure scores higher in this mode.' : ''}</p>
           <div className="scroll-hint"><i />scroll to explore</div>
         </Panel>
 

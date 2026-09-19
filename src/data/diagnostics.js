@@ -101,41 +101,119 @@ export function sampleReport(url = 'https://your-site.com') {
   }
 }
 
-// ---- GEO score over what a URL alone can prove: crawler access (robots),
-// extractability (rendering gap) and structured data. Freshness is intentionally
-// absent — no crawl logs from a one-shot scan. Each factor is skipped when its
-// check errored or returned an unusable (bot-challenged) baseline, and the score
-// renormalizes over the factors that remain. Returns 0-100 + a breakdown. ----
-export function computeGeoScore(report = sampleReport()) {
-  const factors = []
+// ---- Deterministic GEO signals. Each is a value in [0,1] describing "how
+// exposed / AI-readable the site is" on one axis, derived straight from the
+// crawler tests. A signal is omitted (null) when its check errored or ran on a
+// bot-challenged baseline, so it never counts as pass or fail. These are
+// direction-neutral — a mode decides whether high or low is "good". ----
+function geoSignals(report = sampleReport()) {
+  const out = {}
+  const add = (key, value, note) => { if (value != null && !Number.isNaN(value)) out[key] = { value, note } }
 
-  // crawler access: share of AI bots allowed to the target path
+  // access: share of AI bots robots.txt allows to the target path
   if (report.robots?.ok) {
-    const bots = report.robots.data.perBot
-    const allowed = bots.filter((b) => b.allowedTargetPath).length
-    factors.push({ key: 'access', label: 'Crawler access', weight: 45,
-      pct: bots.length ? allowed / bots.length : 0, note: `${allowed}/${bots.length} AI bots allowed` })
+    const b = report.robots.data.perBot
+    const allowed = b.filter((x) => x.allowedTargetPath).length
+    add('access', b.length ? allowed / b.length : null, `${allowed}/${b.length} AI bots allowed`)
   }
 
-  // extractability: rendering gap (lower gap = better). Only when the raw fetch was usable.
+  // served / uaMatch: of the bot UAs, how many get real content, and how many
+  // get content that MATCHES the human baseline (no cloaking mismatch)
+  if (report.uaDiff?.ok && report.uaDiff.data.baselineUsable) {
+    const b = report.uaDiff.data.perBot
+    const served = b.filter((x) => !x.blocked).length
+    const matched = b.filter((x) => !x.blocked && !x.substanceMismatch).length
+    add('served', b.length ? served / b.length : null, `${served}/${b.length} bots served content`)
+    add('uaMatch', b.length ? matched / b.length : null, `${matched}/${b.length} match the human view`)
+  }
+
+  // extractable: content present in raw HTML (low JS-rendering gap)
   if (report.renderingGap?.ok && report.renderingGap.data.rawFetchUsable) {
     const gap = report.renderingGap.data.gapPercent
-    factors.push({ key: 'extract', label: 'Extractability', weight: 30, pct: Math.max(0, 1 - gap / 100),
-      note: `${gap}% JS-only` })
+    add('extractable', Math.max(0, 1 - gap / 100), `${gap}% JS-only`)
   }
 
-  // structured data: schema present. Only when the fetch was usable (else absence is unproven).
+  // structured: schema.org present and complete
   if (report.schema?.ok && report.schema.data.fetchUsable) {
-    const has = report.schema.data.found
-    const pctField = has && report.schema.data.fieldCompleteness ? report.schema.data.fieldCompleteness.percent / 100 : has ? 1 : 0
-    factors.push({ key: 'schema', label: 'Structured data', weight: 25, pct: pctField,
-      note: has ? `JSON-LD present${report.schema.data.fieldCompleteness ? ` · ${report.schema.data.fieldCompleteness.percent}% fields` : ''}` : 'no schema.org' })
+    const found = report.schema.data.found
+    const pct = found ? (report.schema.data.fieldCompleteness?.percent ?? 100) : 0
+    add('structured', found ? pct / 100 : 0, found ? `schema ${pct}% complete` : 'no schema.org')
   }
 
-  const totalWeight = factors.reduce((s, f) => s + f.weight, 0) || 1
-  const score = Math.round(factors.reduce((s, f) => s + f.weight * f.pct, 0) / totalWeight * 100)
+  // substance: how much a non-JS crawler actually gets to read (words + structure)
+  if (report.content?.ok && report.content.data.fetchUsable) {
+    const c = report.content.data
+    const words = Math.min(1, c.wordCount / 800)
+    const headings = c.h1Count + c.h2Count + c.h3Count
+    const struct = Math.min(1, headings / 8)
+    add('substance', 0.7 * words + 0.3 * struct, `${c.wordCount} words · ${headings} headings`)
+  }
+
+  // parity: share of bots whose page is identical to the browser view (mirror fidelity)
+  if (report.perBotSignals?.ok && report.perBotSignals.data.baselineUsable) {
+    const comp = report.perBotSignals.data.perBot.filter((x) => !x.error && x.fetchUsable)
+    const same = comp.filter((x) => x.differences.length === 0).length
+    add('parity', comp.length ? same / comp.length : null, `${same}/${comp.length} bots see the same page`)
+  }
+
+  return out
+}
+
+const SIGNAL_LABELS = {
+  access: 'Crawler access',
+  served: 'Bots served',
+  uaMatch: 'Human/bot parity',
+  extractable: 'Extractability',
+  structured: 'Structured data',
+  substance: 'Content substance',
+  parity: 'Per-bot parity',
+}
+
+// ---- Per-mode scoring. Same signals, read through the lens of what the mode is
+// TRYING to do. `dir: 1` means high exposure is good (contributes the signal as-is);
+// `dir: -1` means the mode wants the opposite, so it contributes (1 - signal): the
+// more locked-down the site, the higher the score. The score renormalizes over
+// whichever signals were measurable. ----
+export const MODE_SCORING = {
+  amplify: {
+    title: 'Amplify score',
+    aim: 'Maximize what AI can read and cite — allowed, extractable, structured, substantial. Higher exposure scores higher.',
+    weights: { access: { w: 20, dir: 1 }, extractable: { w: 25, dir: 1 }, structured: { w: 25, dir: 1 }, substance: { w: 20, dir: 1 }, served: { w: 10, dir: 1 } },
+  },
+  mirror: {
+    title: 'Mirror score',
+    aim: 'AI should see exactly what a person sees — no cloaking, no JS gap, per-bot parity. Fidelity scores higher.',
+    weights: { uaMatch: { w: 30, dir: 1 }, extractable: { w: 25, dir: 1 }, parity: { w: 25, dir: 1 }, access: { w: 20, dir: 1 } },
+  },
+  cloak: {
+    title: 'Shielding score',
+    aim: 'Keep AI out — the more crawlers are blocked and un-served, the better. Lower exposure scores higher.',
+    weights: { access: { w: 45, dir: -1 }, served: { w: 45, dir: -1 }, extractable: { w: 10, dir: -1 } },
+  },
+}
+
+// Deterministic, mode-aware GEO score. Returns 0-100, a grade, the per-factor
+// breakdown (pct is the mode-adjusted contribution, so a full bar is always
+// "good for this mode"), and the mode's title/aim for the UI. ----
+export function computeGeoScore(report = sampleReport(), mode = 'mirror') {
+  const sig = geoSignals(report)
+  const spec = MODE_SCORING[mode] ?? MODE_SCORING.mirror
+  const factors = []
+  let totalWeight = 0
+  let acc = 0
+
+  for (const [key, { w, dir }] of Object.entries(spec.weights)) {
+    const s = sig[key]
+    if (!s) continue // signal was inconclusive / not measurable — skip, don't penalize
+    const pct = dir > 0 ? s.value : 1 - s.value
+    factors.push({ key, label: SIGNAL_LABELS[key], weight: w, pct, note: s.note, dir })
+    totalWeight += w
+    acc += w * pct
+  }
+
+  const score = totalWeight ? Math.round((acc / totalWeight) * 100) : 0
   const grade = score >= 80 ? 'A' : score >= 65 ? 'B' : score >= 50 ? 'C' : score >= 35 ? 'D' : 'F'
-  return { score, grade, factors }
+  return { score, grade, factors, title: spec.title, aim: spec.aim }
 }
 
 // ---- Agent identity: how Aperture's proxy decides who gets the exposure
