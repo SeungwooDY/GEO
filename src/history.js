@@ -1,5 +1,5 @@
 // Per-user library of analyzed sites (client-side for now).
-import { sampleReport, computeGeoScore, freshness } from './data/diagnostics'
+import { sampleReport, computeGeoScore } from './data/diagnostics'
 
 const KEY = 'aperture_history'
 
@@ -9,7 +9,7 @@ export function getHistory() {
 
 export function recordScan(value, mode) {
   if (!value) return
-  const { score, grade } = computeGeoScore(sampleReport(value), freshness)
+  const { score, grade } = computeGeoScore(sampleReport(value))
   let list = getHistory().filter((e) => e.value !== value)
   list.unshift({ value, mode, score, grade, ts: Date.now() })
   list = list.slice(0, 24)

@@ -1,10 +1,46 @@
-// Front-end data layer. Shapes match the `crawlers` engine's DiagnosticReport
-// (src/crawlers/types.ts) verbatim, so this is a drop-in for the real
-// runDiagnostics(url) output / a thin API endpoint later. Freshness, metrics
-// and ANS lanes are the Phase-2/observability + demo layers on top.
+// Front-end data layer for the URL diagnostics engine.
+//
+// `scanReport(url)` calls the bridge (server/bridge.ts -> the engine's
+// runDiagnostics) and returns a real DiagnosticReport whose shape matches
+// src/crawlers/types.ts verbatim. `sampleReport()` is the same shape, kept as an
+// offline fallback for demos when the bridge isn't running.
+//
+// URL-only: there is no GitHub path here — the engine has none. Freshness and
+// live crawl observability are omitted (they need the proxy running in front of
+// the site, which a one-shot URL scan can't produce).
 
-// ---- a realistic Phase-1 diagnostic report (JS-heavy marketing site) ----
-export function sampleReport(url = 'github.com/vercel/next.js') {
+const API = {
+  scan: '/api/scan',
+  robots: (mode) => `/api/robots?mode=${encodeURIComponent(mode)}`,
+}
+
+// ---- real scan: POST the url to the bridge, get back a DiagnosticReport ----
+export async function scanReport(url) {
+  const res = await fetch(API.scan, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ url }),
+  })
+  if (!res.ok) {
+    let msg = `scan failed (${res.status})`
+    try { const e = await res.json(); if (e?.error) msg = e.error } catch { /* keep default */ }
+    throw new Error(msg)
+  }
+  return res.json() // DiagnosticReport
+}
+
+// ---- real per-mode robots.txt from the engine (generateAiBotRobots), with a
+// templated fallback if the bridge is unreachable ----
+export async function fetchRobots(mode) {
+  try {
+    const res = await fetch(API.robots(mode))
+    if (res.ok) return await res.text()
+  } catch { /* fall through to templated preview */ }
+  return generateConfig(mode).robots
+}
+
+// ---- offline fallback report (JS-heavy marketing site), full DiagnosticReport shape ----
+export function sampleReport(url = 'https://your-site.com') {
   return {
     url,
     robots: {
@@ -34,68 +70,66 @@ export function sampleReport(url = 'github.com/vercel/next.js') {
     },
     renderingGap: {
       ok: true,
-      data: {
-        rawStatusCode: 200,
-        rawFetchUsable: true,
-        rawTextLength: 1840,
-        renderedTextLength: 9120,
-        gapPercent: 80,
-        jsDependent: true,
-      },
+      data: { rawStatusCode: 200, rawFetchUsable: true, rawTextLength: 1840, renderedTextLength: 9120, gapPercent: 80, jsDependent: true },
     },
     schema: {
       ok: true,
-      data: { fetchUsable: true, statusCode: 200, found: false, types: [], blockCount: 0 },
+      data: {
+        fetchUsable: true, statusCode: 200, found: true, types: ['Organization'], blockCount: 1,
+        fieldCompleteness: { present: ['name', 'url'], missing: ['telephone', 'address', 'openingHours', 'areaServed'], percent: 33 },
+        telephone: null, telephoneInVisibleText: null,
+      },
+    },
+    content: {
+      ok: true,
+      data: {
+        fetchUsable: true, statusCode: 200, responseTimeMs: 240, htmlBytes: 48210, wordCount: 320, textToHtmlRatio: 0.08,
+        h1Count: 1, h2Count: 4, h3Count: 6, statCount: 3, quoteCount: 0, outboundLinkHosts: 5, questionHeadings: 1, lastModifiedHeader: null,
+      },
+    },
+    perBotSignals: {
+      ok: true,
+      data: {
+        baselineUsable: true,
+        perBot: [
+          { bot: 'GPTBot', statusCode: 200, fetchUsable: true, schemaTypes: ['Organization'], schemaCompletenessPercent: 33, wordCount: 120, differences: ['word count 120 vs 320 (62% less)'], error: null },
+          { bot: 'ClaudeBot', statusCode: 200, fetchUsable: true, schemaTypes: ['Organization'], schemaCompletenessPercent: 33, wordCount: 320, differences: [], error: null },
+          { bot: 'PerplexityBot', statusCode: 403, fetchUsable: false, schemaTypes: [], schemaCompletenessPercent: 0, wordCount: 0, differences: [], error: null },
+        ],
+      },
     },
   }
 }
 
-// ---- freshness (Phase-2 / log-dependent) ----
-export const freshness = {
-  perBot: [
-    { bot: 'GPTBot', lastHitDays: 2 },
-    { bot: 'ClaudeBot', lastHitDays: 6 },
-    { bot: 'PerplexityBot', lastHitDays: null }, // never
-    { bot: 'Google-Extended', lastHitDays: 11 },
-  ],
-  lagDays: 6, // freshest meaningful crawl age used in the score
-}
-
-// ---- GEO score: robots access + freshness (primary, per PLAN) with schema
-// and rendering-gap as modifiers. Only measurable factors are included; the
-// score renormalizes over them (so a CLI run with no crawl logs still scores
-// fairly on what a URL alone can prove). Returns 0-100 + factor breakdown. ----
-export function computeGeoScore(report = sampleReport(), fresh = freshness) {
+// ---- GEO score over what a URL alone can prove: crawler access (robots),
+// extractability (rendering gap) and structured data. Freshness is intentionally
+// absent — no crawl logs from a one-shot scan. Each factor is skipped when its
+// check errored or returned an unusable (bot-challenged) baseline, and the score
+// renormalizes over the factors that remain. Returns 0-100 + a breakdown. ----
+export function computeGeoScore(report = sampleReport()) {
   const factors = []
 
-  // robots: share of AI bots allowed to the target path
-  if (report.robots.ok) {
+  // crawler access: share of AI bots allowed to the target path
+  if (report.robots?.ok) {
     const bots = report.robots.data.perBot
     const allowed = bots.filter((b) => b.allowedTargetPath).length
-    factors.push({ key: 'access', label: 'Crawler access', weight: 35,
+    factors.push({ key: 'access', label: 'Crawler access', weight: 45,
       pct: bots.length ? allowed / bots.length : 0, note: `${allowed}/${bots.length} AI bots allowed` })
   }
 
-  // freshness: recency of the most recent crawl (30d window -> 0). Skipped
-  // when unavailable (no crawl logs) — pass fresh = null.
-  if (fresh) {
-    const lag = fresh.lagDays ?? 30
-    factors.push({ key: 'freshness', label: 'Freshness', weight: 30, pct: Math.max(0, 1 - lag / 30),
-      note: fresh.lagDays == null ? 'never crawled' : `last crawl ${lag}d ago` })
-  }
-
-  // extractability: rendering gap (lower gap = better)
-  if (report.renderingGap.ok) {
+  // extractability: rendering gap (lower gap = better). Only when the raw fetch was usable.
+  if (report.renderingGap?.ok && report.renderingGap.data.rawFetchUsable) {
     const gap = report.renderingGap.data.gapPercent
-    factors.push({ key: 'extract', label: 'Extractability', weight: 20, pct: Math.max(0, 1 - gap / 100),
+    factors.push({ key: 'extract', label: 'Extractability', weight: 30, pct: Math.max(0, 1 - gap / 100),
       note: `${gap}% JS-only` })
   }
 
-  // structure: schema present
-  if (report.schema.ok) {
+  // structured data: schema present. Only when the fetch was usable (else absence is unproven).
+  if (report.schema?.ok && report.schema.data.fetchUsable) {
     const has = report.schema.data.found
-    factors.push({ key: 'schema', label: 'Structured data', weight: 15, pct: has ? 1 : 0,
-      note: has ? 'JSON-LD present' : 'no schema.org' })
+    const pctField = has && report.schema.data.fieldCompleteness ? report.schema.data.fieldCompleteness.percent / 100 : has ? 1 : 0
+    factors.push({ key: 'schema', label: 'Structured data', weight: 25, pct: pctField,
+      note: has ? `JSON-LD present${report.schema.data.fieldCompleteness ? ` · ${report.schema.data.fieldCompleteness.percent}% fields` : ''}` : 'no schema.org' })
   }
 
   const totalWeight = factors.reduce((s, f) => s + f.weight, 0) || 1
@@ -104,57 +138,51 @@ export function computeGeoScore(report = sampleReport(), fresh = freshness) {
   return { score, grade, factors }
 }
 
-// ---- ANS verification lanes (the hackathon demo centerpiece) ----
-export const ansLanes = [
+// ---- Agent identity: how Aperture's proxy decides who gets the exposure
+// artifact. This is the engine's real model (verification/botIdentity.ts +
+// proxy/handler.ts): a claimed AI bot is served the artifact ONLY if its source
+// IP is inside that vendor's published ranges; a spoofed UA from any other IP is
+// treated as an ordinary visitor. ANS was evaluated and rejected — verification
+// is IP-range based only. Illustrative lanes shown in the report. ----
+export const identityLanes = [
   {
-    id: 'registered',
-    label: 'Registered agent',
-    agent: 'aperture-scan',
-    ua: 'aperture-scan/1.0 (+ans)',
-    method: 'ANS signature',
+    id: 'verified',
+    label: 'Published range',
+    agent: 'GPTBot',
+    ua: 'GPTBot/1.2',
+    method: 'IP ∈ OpenAI range',
     status: 'verified',
-    detail: 'Cryptographic identity resolved in the ANS registry. Signature valid.',
+    detail: 'Source IP falls inside OpenAI’s published crawler ranges. Served the exposure artifact.',
   },
   {
     id: 'spoofed',
-    label: 'Spoofed agent',
-    agent: 'aperture-scan (impostor)',
-    ua: 'aperture-scan/1.0 (+ans)',
-    method: 'ANS signature',
+    label: 'Spoofed UA',
+    agent: 'GPTBot (impostor)',
+    ua: 'GPTBot/1.2',
+    method: 'IP ∉ any range',
     status: 'failed',
-    detail: 'Identical User-Agent, but no valid ANS signature. Identity rejected.',
+    detail: 'Identical User-Agent, but the source IP is outside every vendor range. Treated as an ordinary visitor — gets the plain site, never the artifact.',
   },
   {
-    id: 'fallback',
-    label: 'Known crawler',
-    agent: 'GPTBot',
-    ua: 'GPTBot/1.2',
-    method: 'IP-range fallback',
-    status: 'verified',
-    detail: 'Not in ANS, but source IP matches OpenAI’s published range.',
+    id: 'passthrough',
+    label: 'No bot claim',
+    agent: 'a person / unknown UA',
+    ua: '(no AI-bot token)',
+    method: 'no claim',
+    status: 'passthrough',
+    detail: 'No AI-bot token in the User-Agent. Passes straight through to the origin, untouched.',
   },
 ]
 
-// ---- observability metrics (per-bot hits + path coverage) ----
-export const metrics = {
-  perBot: [
-    { bot: 'GPTBot', total: 1284, perDay: [4, 9, 6, 12, 8, 15, 22, 18, 27, 31, 24, 29], lastHitHrs: 5 },
-    { bot: 'ClaudeBot', total: 642, perDay: [2, 3, 5, 4, 7, 6, 9, 8, 11, 10, 13, 12], lastHitHrs: 14 },
-    { bot: 'PerplexityBot', total: 0, perDay: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], lastHitHrs: null },
-  ],
-  pathCoverage: {
-    sitemapTotal: 128,
-    crawled: 87,
-    orphaned: ['/pricing/enterprise', '/docs/edge-runtime', '/blog/2024-geo', '/changelog'],
-  },
-}
-
-// ---- exposure -> generated config preview (ties the iris to real output) ----
+// ---- exposure -> generated config preview (ties the iris to real output).
+// robots.txt is real (fetched per-mode from the engine via fetchRobots); llms.txt
+// and JSON-LD are templated previews — the engine generates those from a business
+// profile, which a URL scan doesn't have. ----
 export function generateConfig(mode) {
   const robotsByMode = {
     cloak: `User-agent: GPTBot\nDisallow: /\n\nUser-agent: ClaudeBot\nDisallow: /\n\nUser-agent: PerplexityBot\nDisallow: /`,
-    mirror: `User-agent: *\nAllow: /\nSitemap: /sitemap.xml`,
-    amplify: `User-agent: *\nAllow: /\nSitemap: /sitemap.xml\n\n# AI answer engines\nUser-agent: GPTBot\nAllow: /\nUser-agent: ClaudeBot\nAllow: /\nUser-agent: PerplexityBot\nAllow: /`,
+    mirror: `User-agent: GPTBot\nAllow: /\n\nUser-agent: ClaudeBot\nAllow: /\n\nUser-agent: PerplexityBot\nAllow: /`,
+    amplify: `User-agent: GPTBot\nAllow: /\n\nUser-agent: ClaudeBot\nAllow: /\n\nUser-agent: PerplexityBot\nAllow: /`,
   }
   const llmsByMode = {
     cloak: '# llms.txt\n# Exposure: Cloak — retrieval disabled.',

@@ -7,7 +7,7 @@ import Report from './Report'
 import Mission from './Mission'
 import About from './About'
 import { scramble } from './scramble'
-import { generateConfig } from './data/diagnostics'
+import { generateConfig, fetchRobots } from './data/diagnostics'
 import { recordScan } from './history'
 import clipEvidence from './assets/video/evidence-room.mp4'
 import clipGeometry from './assets/video/hero-geometry.mp4'
@@ -41,9 +41,10 @@ function isValidTarget(source, raw) {
 export default function Landing() {
   const [stage, setStage] = useState('enter')   // enter -> aperture -> analysis
   const [mode, setMode] = useState('mirror')
-  const [source, setSource] = useState('github')
+  const [source, setSource] = useState('url')     // URL-only: GitHub analysis isn't wired to the engine yet
   const [value, setValue] = useState('')
   const [cfgTab, setCfgTab] = useState('robots')
+  const [robotsText, setRobotsText] = useState(null)  // real per-mode robots.txt from the engine
   const [atBottom, setAtBottom] = useState(false)
   const [clipIdx, setClipIdx] = useState(0)   // 0 = evidence, 1 = geometry (14s loop)
 
@@ -119,8 +120,17 @@ export default function Landing() {
     return () => cancel()
   }, [mode, stage])
 
+  // pull the real per-mode robots.txt from the engine for the preview
+  useEffect(() => {
+    let live = true
+    setRobotsText(null)
+    fetchRobots(mode).then((t) => { if (live) setRobotsText(t) })
+    return () => { live = false }
+  }, [mode])
+
   const m = MODES[mode]
   const cfg = generateConfig(mode)
+  const cfgBody = cfgTab === 'robots' ? (robotsText ?? cfg.robots) : cfg[cfgTab]
   const valid = isValidTarget(source, value)
 
   const scrollNext = () => {
@@ -170,16 +180,17 @@ export default function Landing() {
               <p className="home-desc" ref={promptRef}>Point your site to Aperture.</p>
               <form className="input-row home-input" ref={inputRef} onSubmit={startAnalyze}>
                 <div className="src-toggle">
-                  <button type="button" className={source === 'github' ? 'active' : ''} onClick={() => setSource('github')} aria-label="GitHub repository"><GitHubIcon /></button>
-                  <button type="button" className={source === 'url' ? 'active' : ''} onClick={() => setSource('url')} aria-label="Website URL"><LinkIcon /></button>
+                  <button type="button" className="disabled" disabled aria-disabled="true" title="GitHub analysis — coming soon" aria-label="GitHub repository (coming soon)"><GitHubIcon /></button>
+                  <button type="button" className="active" aria-label="Website URL"><LinkIcon /></button>
                 </div>
                 <input value={value} onChange={(e) => setValue(e.target.value)} autoFocus
-                  placeholder={source === 'github' ? 'github.com/user/repo' : 'https://your-site.com'} />
+                  placeholder="https://your-site.com" />
                 <button className={`go ${valid ? 'lit' : ''}`} type="submit" aria-label="Analyze" disabled={!valid}><ArrowIcon /></button>
               </form>
               {value.trim() && !valid && (
-                <p className="input-err mono">{source === 'github' ? 'Enter a GitHub repo URL — github.com/owner/repo' : 'Enter a valid site URL — https://example.com'}</p>
+                <p className="input-err mono">Enter a valid site URL — https://example.com</p>
               )}
+              <p className="src-hint mono">GitHub repo analysis — coming soon.</p>
             </div>
           </div>
         </section>
@@ -223,7 +234,7 @@ export default function Landing() {
                   <button key={t.key} className={`cfg-tab ${cfgTab === t.key ? 'active' : ''}`} onClick={() => setCfgTab(t.key)}>{t.label}</button>
                 ))}
               </div>
-              <pre className="cfg-body">{cfg[cfgTab]}</pre>
+              <pre className="cfg-body">{cfgBody}</pre>
             </div>
 
             <button className="ap-submit" onClick={() => { recordScan(value, mode); setStage('analysis') }}>
