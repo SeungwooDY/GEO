@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { scanReport, sampleReport, computeGeoScore, identityLanes } from './data/diagnostics'
+import { scanReport, sampleReport, computeGeoScore, identityLanes, firewallBots } from './data/diagnostics'
 
 const PANELS = 7
 
@@ -80,7 +80,7 @@ export default function Report({ url, mode, onBack }) {
     )
   }
 
-  const { score, grade, factors, title, aim } = computeGeoScore(report, mode)
+  const { score, grade, factors, title, aim, coverage, indeterminate, reason, protection } = computeGeoScore(report, mode)
   const robots = report.robots
   const ua = report.uaDiff
   const rg = report.renderingGap
@@ -90,6 +90,7 @@ export default function Report({ url, mode, onBack }) {
   const rgd = rg?.ok ? rg.data : null
   const rgMax = rgd ? Math.max(rgd.renderedTextLength, rgd.rawTextLength, 1) : 1
   const cd = content?.ok ? content.data : null
+  const fw = firewallBots(report) // bots turned away by edge protection, not policy
 
   return (
     <>
@@ -99,8 +100,16 @@ export default function Report({ url, mode, onBack }) {
         <Panel idx="01" title={title}>
           <div className="score-row">
             <div>
-              <div className="score-big">{score}</div>
-              <div className="score-meta">GRADE <b>{grade}</b> · EXPOSURE <b>{mode?.toUpperCase() || '—'}</b></div>
+              {indeterminate ? (
+                <div className="score-indet-big">Can’t<br />conclude</div>
+              ) : (
+                <div className="score-big">{score}</div>
+              )}
+              <div className="score-meta">
+                {indeterminate
+                  ? <>STATUS <b>INDETERMINATE</b> · EXPOSURE <b>{mode?.toUpperCase() || '—'}</b> · COVERAGE <b>{Math.round(coverage * 100)}%</b></>
+                  : <>GRADE <b>{grade}</b> · EXPOSURE <b>{mode?.toUpperCase() || '—'}</b> · COVERAGE <b>{Math.round(coverage * 100)}%</b></>}
+              </div>
               <div className="score-meta" style={{ marginTop: 4 }}>{report.url}</div>
             </div>
             <div className="factors">
@@ -111,10 +120,18 @@ export default function Report({ url, mode, onBack }) {
                   <span className="note">{f.note}</span>
                 </div>
               ))}
+              {factors.length === 0 && <p className="dnote">No page-level signals could be measured.</p>}
             </div>
           </div>
-          <p className="dnote" style={{ marginTop: 16 }}>{aim}</p>
-          <p className="dnote">Deterministic, from the crawler tests below. Signals that came back inconclusive are dropped, not penalized. {factors.some((f) => f.dir < 0) ? '↓ = lower exposure scores higher in this mode.' : ''}</p>
+          {indeterminate ? (
+            <p className="dnote indet-note" style={{ marginTop: 18 }}>{reason} What we can still confirm is below — stated policy (robots.txt) and any checks that got through.</p>
+          ) : (<>
+            <p className="dnote" style={{ marginTop: 16 }}>{aim}</p>
+            <p className="dnote">Deterministic, from the crawler tests below. Signals that came back inconclusive are dropped, not penalized. {factors.some((f) => f.dir < 0) ? '↓ = lower exposure scores higher in this mode.' : ''}</p>
+            {protection.challenged && (
+              <p className="dnote"><span className="stat warn">Edge protection</span> {protection.checks.join(', ')} challenged (HTTP {protection.codes.join('/')}); scored on the remaining signals.</p>
+            )}
+          </>)}
           <div className="scroll-hint"><i />scroll to explore</div>
         </Panel>
 
@@ -146,12 +163,16 @@ export default function Report({ url, mode, onBack }) {
                 <thead><tr><th>Bot</th><th>Vendor</th><th>Verdict</th></tr></thead>
                 <tbody>
                   {ua.data.perBot.map((b) => {
-                    const cls = b.blocked ? 'bad' : b.substanceMismatch ? 'warn' : 'ok'
-                    const label = b.blocked ? 'Blocked' : b.substanceMismatch ? 'Mismatch' : 'Match'
+                    // A firewall challenge (robots allows the bot, but the edge refused it) isn't an
+                    // AI-access verdict — show Challenged, not a false Blocked/Mismatch. An intentional
+                    // robots-disallow that also 403s still reads as Blocked.
+                    const challenged = fw.has(b.bot)
+                    const cls = challenged ? 'warn' : b.blocked ? 'bad' : b.substanceMismatch ? 'warn' : 'ok'
+                    const label = challenged ? 'Challenged' : b.blocked ? 'Blocked' : b.substanceMismatch ? 'Mismatch' : 'Match'
                     return (
                       <tr key={b.bot}>
                         <td>{b.bot}</td><td>{b.vendor}</td>
-                        <td><span className={`stat ${cls}`}>{label}</span></td>
+                        <td><span className={`stat ${cls}`} title={challenged ? `HTTP ${b.statusCode} — edge protection, not an AI policy` : undefined}>{label}</span></td>
                       </tr>
                     )
                   })}
@@ -261,6 +282,7 @@ export default function Report({ url, mode, onBack }) {
         <span className="hprogress" style={{ width: `${progress * 100}%` }} />
         <span className="hbar-l">
           APERTURE <b>// diagnostic report</b> · {report.url}
+          {protection.challenged && <span className="hbar-offline" title={`Firewall challenges: ${protection.checks.join(', ')}`}> · edge-protected (HTTP {protection.codes.join('/')})</span>}
           {status === 'offline' && <span className="hbar-offline" title={errMsg}> · offline sample (bridge unreachable)</span>}
         </span>
         <span className="hbar-r">

@@ -35,14 +35,28 @@ async function settle<T>(work: Promise<T>): Promise<CheckOutcome<T>> {
   }
 }
 
+// A firewall that hangs (rather than returning 403) would otherwise freeze the whole
+// scan. Race each check against a deadline so a hung check becomes an inconclusive
+// signal — which the scorer treats as "couldn't measure", not a finding. The engine
+// fetch keeps running in the background but no longer blocks the response.
+function withTimeout<T>(work: Promise<T>, ms: number, label: string): Promise<CheckOutcome<T>> {
+  const deadline = new Promise<CheckOutcome<T>>((resolve) => {
+    const t = setTimeout(() => resolve({ ok: false, error: `${label} timed out after ${ms / 1000}s (likely edge protection)` }), ms);
+    t.unref?.();
+  });
+  return Promise.race([settle(work), deadline]);
+}
+
 async function runDiagnostics(url: string): Promise<DiagnosticReport> {
+  const FETCH_MS = 15000;
+  const RENDER_MS = 30000; // headless render legitimately takes longer than a plain fetch
   const [robots, uaDiff, renderingGap, schema, content, perBotSignals] = await Promise.all([
-    settle(checkRobots(url, new URL(url).pathname)),
-    settle(checkUaDiff(url)),
-    settle(checkRenderingGap(url)), // Chromium-less machines get { ok:false } here; the rest of the scan still returns.
-    settle(checkSchema(url)),
-    settle(checkContentSignals(url)),
-    settle(checkPerBotSignals(url)),
+    withTimeout(checkRobots(url, new URL(url).pathname), FETCH_MS, 'robots'),
+    withTimeout(checkUaDiff(url), FETCH_MS, 'cloaking'),
+    withTimeout(checkRenderingGap(url), RENDER_MS, 'rendering'), // Chromium-less machines get { ok:false } here; the rest of the scan still returns.
+    withTimeout(checkSchema(url), FETCH_MS, 'schema'),
+    withTimeout(checkContentSignals(url), FETCH_MS, 'content'),
+    withTimeout(checkPerBotSignals(url), RENDER_MS, 'per-bot'),
   ]);
   return { url, robots, uaDiff, renderingGap, schema, content, perBotSignals };
 }

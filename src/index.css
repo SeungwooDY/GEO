@@ -545,6 +545,11 @@ body.no-scroll { overflow: hidden; }
 .hback:active { transform: scale(0.97); }
 @media (hover: hover) and (pointer: fine) { .hback:hover { background: color-mix(in srgb, var(--fg) 8%, transparent); } }
 .hbar-offline { color: var(--warn); }
+.score-indet-big { font-family: var(--mono); font-weight: 600; font-size: 40px; line-height: 0.98;
+  letter-spacing: -0.02em; text-transform: uppercase; color: var(--warn); }
+.indet-note { border-left: 2px solid var(--warn); padding-left: 14px; font-size: 13px; line-height: 1.65;
+  color: color-mix(in srgb, var(--fg) 72%, var(--muted)); max-width: 640px; }
+@media (max-width: 700px) { .score-indet-big { font-size: 32px; } }
 
 /* scan-in-progress status screen */
 .hreport-status { justify-content: center; align-items: center; }
