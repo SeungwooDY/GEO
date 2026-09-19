@@ -1,3 +1,5 @@
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { startMockSite } from './mock-site/server.js';
 import { checkRobots } from './crawlers/robotsParser.js';
 import { checkUaDiff } from './crawlers/uaDiffChecker.js';
@@ -5,6 +7,8 @@ import { checkRenderingGap } from './crawlers/renderingGapScorer.js';
 import { checkSchema } from './crawlers/schemaChecker.js';
 import { checkContentSignals } from './crawlers/contentSignals.js';
 import { checkPerBotSignals } from './crawlers/perBotSignals.js';
+import { buildSuggestions } from './suggestions/suggestionEngine.js';
+import type { SuggestionsResult } from './suggestions/suggestionEngine.js';
 import type { CheckOutcome, DiagnosticReport } from './crawlers/types.js';
 
 async function settle<T>(work: Promise<T>): Promise<CheckOutcome<T>> {
@@ -138,18 +142,58 @@ function printReport(report: DiagnosticReport): void {
   console.log();
 }
 
+function printSuggestions({ suggestions, checks }: SuggestionsResult): void {
+  const passed = checks.filter((c) => c.status === 'pass').length;
+  const rollup = checks.map((c) => `${c.checkId}=${c.status}`).join(' ');
+  console.log(`[Checks] ${passed}/${checks.length} passed  (${rollup})`);
+
+  if (suggestions.length === 0) {
+    console.log('\n[Suggestions] none — all conclusive checks passed.');
+  } else {
+    console.log(`\n[Suggestions] ${suggestions.length} finding(s), by severity:`);
+    for (const s of suggestions) {
+      console.log(`  ${s.severity.toUpperCase().padEnd(6)} ${s.id}${s.task ? `  →  task: ${s.task}` : ''}`);
+      console.log(`         ${s.finding}`);
+      console.log(`         fix: ${s.action}`);
+    }
+  }
+  console.log();
+}
+
+/** Append-only snapshot folder = time-series storage until a real database exists. */
+function writeSnapshot(report: DiagnosticReport, result: SuggestionsResult): string {
+  const dir = join(process.cwd(), 'snapshots');
+  mkdirSync(dir, { recursive: true });
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const host = new URL(report.url).hostname.replace(/[^a-z0-9.-]/gi, '_');
+  const file = join(dir, `${stamp}_${host}.json`);
+  writeFileSync(
+    file,
+    JSON.stringify({ schemaVersion: 1, generatedAt: new Date().toISOString(), report, ...result }, null, 2),
+  );
+  return file;
+}
+
 async function main() {
   const targetUrl = process.argv[2];
 
+  const run = async (url: string) => {
+    const report = await runDiagnostics(url);
+    printReport(report);
+    const result = buildSuggestions(report);
+    printSuggestions(result);
+    console.log(`Snapshot written: ${writeSnapshot(report, result)}\n`);
+  };
+
   if (targetUrl) {
     new URL(targetUrl); // fail fast on a malformed URL
-    printReport(await runDiagnostics(targetUrl));
+    await run(targetUrl);
     return;
   }
 
   const site = await startMockSite(4173);
   try {
-    printReport(await runDiagnostics(site.url));
+    await run(site.url);
   } finally {
     await site.close();
   }
