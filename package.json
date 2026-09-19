@@ -1,0 +1,27 @@
+{
+  "name": "aperture",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "bin": {
+    "aperture": "cli/aperture.js"
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "scan": "node cli/aperture.js"
+  },
+  "dependencies": {
+    "gsap": "^3.12.5",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.1",
+    "vite": "^5.4.2"
+  },
+  "allowScripts": {
+    "esbuild@0.21.5": true
+  }
+}
