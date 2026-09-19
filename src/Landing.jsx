@@ -9,7 +9,8 @@ import About from './About'
 import { scramble } from './scramble'
 import { generateConfig } from './data/diagnostics'
 import { recordScan } from './history'
-import evidenceRoomVideo from './assets/video/evidence-room.mp4'
+import clipEvidence from './assets/video/evidence-room.mp4'
+import clipGeometry from './assets/video/hero-geometry.mp4'
 
 const REDUCE = typeof matchMedia !== 'undefined' &&
   matchMedia('(prefers-reduced-motion: reduce)').matches
@@ -44,12 +45,15 @@ export default function Landing() {
   const [value, setValue] = useState('')
   const [cfgTab, setCfgTab] = useState('robots')
   const [atBottom, setAtBottom] = useState(false)
+  const [clipIdx, setClipIdx] = useState(0)   // 0 = evidence, 1 = geometry (14s loop)
 
   const enterRef = useRef(null)
   const promptRef = useRef(null)
   const inputRef = useRef(null)
   const apRef = useRef(null)
   const lineRef = useRef(null)
+  const vA = useRef(null)
+  const vB = useRef(null)
 
   // enter = light lavender lab; aperture = exposure theme; report = dark console
   useEffect(() => {
@@ -81,6 +85,15 @@ export default function Landing() {
   useEffect(() => {
     document.body.classList.toggle('no-scroll', stage !== 'enter')
   }, [stage])
+
+  // hero background: play evidence clip, then geometry clip, then loop (~14s)
+  useEffect(() => {
+    if (stage !== 'enter') return
+    const cur = clipIdx === 0 ? vA.current : vB.current
+    const other = clipIdx === 0 ? vB.current : vA.current
+    if (other) other.pause()
+    if (cur) { cur.currentTime = 0; cur.play().catch(() => {}) }
+  }, [clipIdx, stage])
 
   // fade the floating arrow out near the bottom of the scroll page
   useEffect(() => {
@@ -146,8 +159,11 @@ export default function Landing() {
       <div className="home-scroll" ref={enterRef}>
         <section className="home-hero" id="sec-hero">
           <div className="home-card">
-            <video className="home-video" autoPlay loop muted playsInline aria-hidden="true">
-              <source src={evidenceRoomVideo} type="video/mp4" />
+            <video ref={vA} className={`home-video ${clipIdx === 0 ? '' : 'is-hidden'}`} autoPlay muted playsInline preload="auto" aria-hidden="true" onEnded={() => { if (clipIdx === 0) setClipIdx(1) }}>
+              <source src={clipEvidence} type="video/mp4" />
+            </video>
+            <video ref={vB} className={`home-video ${clipIdx === 1 ? '' : 'is-hidden'}`} autoPlay muted playsInline preload="auto" aria-hidden="true" onEnded={() => { if (clipIdx === 1) setClipIdx(0) }}>
+              <source src={clipGeometry} type="video/mp4" />
             </video>
             <div className="home-video-scrim" aria-hidden="true" />
             <div className="home-center">

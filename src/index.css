@@ -100,11 +100,12 @@ body.no-scroll { overflow: hidden; }
   --fg: var(--panel-fg); --muted: var(--panel-muted); --line: var(--panel-line); --bg: var(--panel); --accent: var(--panel-fg);
   display: flex; align-items: center; justify-content: center; }
 .home-video { position: absolute; inset: 0; z-index: 0; width: 100%; height: 100%; object-fit: cover;
-  pointer-events: none; opacity: 0.42; filter: brightness(0.58) contrast(0.92) saturate(0.65); }
+  pointer-events: none; opacity: 0.7; filter: brightness(0.78) contrast(1.02) saturate(0.68);
+  transition: opacity 0.5s var(--ease); }
+.home-video.is-hidden { opacity: 0; }
 .home-video-scrim { position: absolute; inset: 0; z-index: 1; pointer-events: none;
   background:
-    radial-gradient(ellipse 57% 57% at 50% 50%, rgba(22,21,28,0.96) 0%, rgba(22,21,28,0.87) 48%, rgba(22,21,28,0.54) 100%),
-    linear-gradient(90deg, rgba(22,21,28,0.36), transparent 28%, transparent 72%, rgba(22,21,28,0.36)); }
+    radial-gradient(ellipse 50% 58% at 50% 46%, rgba(22,21,28,0.95) 0%, rgba(22,21,28,0.82) 40%, rgba(22,21,28,0.3) 100%); }
 .home-center { position: relative; z-index: 2; width: 100%; max-width: 760px; padding: 0 32px; text-align: center;
   display: flex; flex-direction: column; align-items: center; }
 .home-iris { width: clamp(92px, 11vw, 140px); height: clamp(92px, 11vw, 140px); color: var(--panel-fg);
@@ -113,6 +114,17 @@ body.no-scroll { overflow: hidden; }
 .iris-rot { transform-box: view-box; transform-origin: 0px 0px; animation: netSpin 120s linear infinite; }
 .home-desc { font-family: 'Alliance No2', var(--sans); font-weight: 400; font-size: clamp(22px, 3vw, 38px);
   line-height: 1.2; letter-spacing: -0.01em; color: var(--panel-fg); min-height: 1.2em; }
+/* rotating word (site -> small business -> repo ...) */
+.rot { display: inline-block; perspective: 800px; vertical-align: baseline; }
+.rot-word { display: inline-block; font-weight: inherit; white-space: nowrap;
+  transform-origin: 50% 100%; animation: rotCycle 3.2s var(--ease) both; }
+.rot-word.rot-static { animation: none; }
+@keyframes rotCycle {
+  0% { transform: rotateX(-90deg) translateY(0.28em); opacity: 0; }
+  13% { transform: rotateX(0deg) translateY(0); opacity: 1; }
+  84% { transform: rotateX(0deg) translateY(0); opacity: 1; }
+  100% { transform: rotateX(90deg) translateY(-0.28em); opacity: 0; }
+}
 .home-input { margin-top: 30px; opacity: 0; animation: homeFlicker 0.55s steps(1) forwards 1.35s; }
 @keyframes homeFlicker {
   0% { opacity: 0; } 15% { opacity: 0.7; } 30% { opacity: 0.12; } 48% { opacity: 0.95; }
