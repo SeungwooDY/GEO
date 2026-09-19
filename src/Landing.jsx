@@ -8,7 +8,6 @@ import Mission from './Mission'
 import About from './About'
 import { scramble } from './scramble'
 import { generateConfig, fetchRobots } from './data/diagnostics'
-import { recordScan } from './history'
 import clipEvidence from './assets/video/evidence-room.mp4'
 import clipGeometry from './assets/video/hero-geometry.mp4'
 
@@ -34,6 +33,8 @@ function isValidTarget(source, raw) {
   }
   try {
     const u = new URL(v.includes('://') ? v : `https://${v}`)
+    // A GitHub repo is not a website: the engine is URL-only, so never scan github.com as if it were a site.
+    if (/(^|\.)github\.com$/i.test(u.hostname)) return false
     return (u.protocol === 'http:' || u.protocol === 'https:') && u.hostname.includes('.')
   } catch { return false }
 }
@@ -82,9 +83,10 @@ export default function Landing() {
     return () => cancel()
   }, [stage])
 
-  // body scroll: the enter page scrolls; aperture/report are single-screen
+  // body scroll: the landing and the report scroll; only the exposure picker is a fixed single screen
   useEffect(() => {
-    document.body.classList.toggle('no-scroll', stage !== 'enter')
+    document.body.classList.toggle('no-scroll', stage === 'aperture')
+    window.scrollTo(0, 0)
   }, [stage])
 
   // hero background: play evidence clip, then geometry clip, then loop (~14s)
@@ -157,8 +159,7 @@ export default function Landing() {
     }
   }
 
-  // The report is a full-screen horizontal deck — render it outside the
-  // centered stage wrapper so its pinned scroll has the whole viewport.
+  // The report is a full-width scrolling page, so it renders outside the centered stage wrapper.
   if (stage === 'analysis') {
     return <Report url={value} mode={mode} onBack={() => setStage('aperture')} />
   }
@@ -237,7 +238,7 @@ export default function Landing() {
               <pre className="cfg-body">{cfgBody}</pre>
             </div>
 
-            <button className="ap-submit" onClick={() => { recordScan(value, mode); setStage('analysis') }}>
+            <button className="ap-submit" onClick={() => setStage('analysis')}>
               Analyze site <ArrowIcon />
             </button>
           </div>

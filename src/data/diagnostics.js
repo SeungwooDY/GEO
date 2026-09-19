@@ -11,16 +11,34 @@
 
 const API = {
   scan: '/api/scan',
+  files: '/api/files',
   robots: (mode) => `/api/robots?mode=${encodeURIComponent(mode)}`,
+}
+
+// fetch() rejects with the browser's own wording ("Failed to fetch") when the server can't be reached; say it plainly.
+async function post(path, body) {
+  try {
+    return await fetch(path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
+  } catch {
+    throw new Error('Couldn’t reach the Aperture server. Check your connection and try again.')
+  }
+}
+
+// ---- suggested files: POST { url, mode, profile? } -> { files, missing, prefill, evidence, source }.
+// `profile` is the user's edited business details; anything omitted falls back to what the server read off the page.
+export async function fetchFiles(url, mode, profile) {
+  const res = await post(API.files, { url, mode, profile })
+  if (!res.ok) {
+    let msg = `could not build files (${res.status})`
+    try { const e = await res.json(); if (e?.error) msg = e.error } catch { /* keep default */ }
+    throw new Error(msg)
+  }
+  return res.json()
 }
 
 // ---- real scan: POST the url to the bridge, get back a DiagnosticReport ----
 export async function scanReport(url) {
-  const res = await fetch(API.scan, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ url }),
-  })
+  const res = await post(API.scan, { url })
   if (!res.ok) {
     let msg = `scan failed (${res.status})`
     try { const e = await res.json(); if (e?.error) msg = e.error } catch { /* keep default */ }
@@ -176,7 +194,8 @@ function geoSignals(report = sampleReport()) {
     const words = Math.min(1, c.wordCount / 800)
     const headings = c.h1Count + c.h2Count + c.h3Count
     const struct = Math.min(1, headings / 8)
-    add('substance', 0.7 * words + 0.3 * struct, `${c.wordCount} words · ${headings} headings`)
+    const n = (count, one) => `${count.toLocaleString()} ${count === 1 ? one : `${one}s`}`
+    add('substance', 0.7 * words + 0.3 * struct, `${n(c.wordCount, 'word')} · ${n(headings, 'heading')}`)
   }
 
   // parity: share of bots whose page is identical to the browser view (mirror

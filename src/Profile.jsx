@@ -1,4 +1,5 @@
-import { getHistory, summarize } from './history'
+import { useState } from 'react'
+import { getHistory, removeScan, summarize } from './history'
 
 function timeAgo(ts) {
   const d = Math.floor((Date.now() - ts) / 1000)
@@ -9,9 +10,17 @@ function timeAgo(ts) {
 }
 
 export default function Profile() {
-  const list = getHistory()
+  const [list, setList] = useState(getHistory)
+  const [confirming, setConfirming] = useState(null) // id of the row awaiting a second click
   const { count, avg, topMode, best } = summarize(list)
   const user = (() => { try { return localStorage.getItem('aperture_user') } catch { return null } })()
+
+  // Two clicks to delete: the first arms the row, the second removes it. Clicking anywhere else disarms it.
+  const del = (id) => {
+    if (confirming !== id) { setConfirming(id); return }
+    setList(removeScan(id))
+    setConfirming(null)
+  }
 
   return (
     <div className="profile">
@@ -35,16 +44,23 @@ export default function Profile() {
         </p>
       )}
 
-      <div className="profile-list">
+      <div className="profile-list" onClick={(e) => { if (!e.target.closest('.lib-del')) setConfirming(null) }}>
         {list.length === 0 ? (
           <p className="profile-empty">No sites analyzed yet. Point Aperture at a site from the home page.</p>
         ) : list.map((e) => (
-          <div className="lib-row" key={e.ts}>
+          <div className="lib-row" key={e.id}>
             <span className="lib-site">{e.value}</span>
             <span className={`lib-grade g-${e.grade}`}>{e.grade}</span>
-            <span className="lib-score mono">{e.score}</span>
+            <span className="lib-score mono">{e.score ?? '—'}</span>
             <span className="lib-mode mono">{e.mode}</span>
             <span className="lib-time mono">{timeAgo(e.ts)}</span>
+            <button
+              className={`lib-del${confirming === e.id ? ' armed' : ''}`}
+              onClick={() => del(e.id)}
+              aria-label={confirming === e.id ? `Confirm delete ${e.value}` : `Delete ${e.value}`}
+            >
+              {confirming === e.id ? 'Confirm' : 'Delete'}
+            </button>
           </div>
         ))}
       </div>

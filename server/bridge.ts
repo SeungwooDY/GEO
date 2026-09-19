@@ -9,6 +9,7 @@
  *
  * Endpoints:
  *   POST /api/scan     { url }        -> DiagnosticReport
+ *   POST /api/files    { url, mode, profile? } -> suggested files (robots merge, sitemap, JSON-LD, llms.txt, markdown)
  *   GET  /api/robots?mode=amplify     -> text/plain robots.txt section (real, mode-only)
  *
  * URL-only by design. There is no GitHub path here — the engine has none.
@@ -25,6 +26,9 @@ import { checkPerBotSignals } from '../src/crawlers/perBotSignals.js';
 import { generateAiBotRobots } from '../src/generators/configGenerator.js';
 import { DELIVERY_MODES, type DeliveryMode } from '../src/mode.js';
 import type { CheckOutcome, DiagnosticReport } from '../src/crawlers/types.js';
+import { checkPublicHost } from './guard.js';
+import { fetchExtract, type PageExtract } from './extract.js';
+import { buildFiles, sanitizeProfileInput } from './files.js';
 
 // Render (and most hosts) inject PORT and require binding 0.0.0.0. Falls back to
 // 8787 locally, where `npm run dev` (Vite) proxies /api here.
@@ -135,6 +139,24 @@ function readBody(req: IncomingMessage): Promise<string> {
   });
 }
 
+// Editing the business form regenerates files without re-reading the site: cache the page read briefly.
+const EXTRACT_TTL_MS = 5 * 60 * 1000;
+const extractCache = new Map<string, { at: number; value: Promise<PageExtract> }>();
+function cachedExtract(url: string): Promise<PageExtract> {
+  const hit = extractCache.get(url);
+  if (hit && Date.now() - hit.at < EXTRACT_TTL_MS) return hit.value;
+  if (extractCache.size >= 50) extractCache.delete(extractCache.keys().next().value as string);
+  const value = fetchExtract(url)
+    .then((page) => {
+      // A read that failed (site down, firewall, timeout) must not stick for 5 minutes.
+      if (page.source === 'unreadable') extractCache.delete(url);
+      return page;
+    })
+    .catch((err) => { extractCache.delete(url); throw err; });
+  extractCache.set(url, { at: Date.now(), value });
+  return value;
+}
+
 const server = createServer(async (req, res) => {
   cors(res);
   const { method } = req;
@@ -170,12 +192,55 @@ const server = createServer(async (req, res) => {
       sendJson(res, 400, { error: 'a valid http(s) url is required' });
       return;
     }
+    const blocked = await checkPublicHost(target);
+    if (blocked) {
+      sendJson(res, 400, { error: blocked });
+      return;
+    }
     try {
       const report = await runDiagnostics(target);
       sendJson(res, 200, report);
     } catch (err) {
       // runDiagnostics itself only throws on a malformed URL (already guarded); anything here is unexpected.
       sendJson(res, 500, { error: err instanceof Error ? err.message : String(err) });
+    }
+    return;
+  }
+
+  if (method === 'POST' && url.pathname === '/api/files') {
+    let parsed: { url?: unknown; mode?: unknown; profile?: unknown };
+    try {
+      parsed = JSON.parse((await readBody(req)) || '{}');
+    } catch {
+      sendJson(res, 400, { error: 'invalid JSON body' });
+      return;
+    }
+    const target = normalizeTarget(parsed.url);
+    if (!target) {
+      sendJson(res, 400, { error: 'a valid http(s) url is required' });
+      return;
+    }
+    if (!DELIVERY_MODES.includes(parsed.mode as DeliveryMode)) {
+      sendJson(res, 400, { error: `mode must be one of ${DELIVERY_MODES.join(', ')}` });
+      return;
+    }
+    const blocked = await checkPublicHost(target);
+    if (blocked) {
+      sendJson(res, 400, { error: blocked });
+      return;
+    }
+    try {
+      const page = await cachedExtract(target);
+      // The user's edits win over what we read off the page; anything they leave out falls back to it.
+      const effective = { ...page.profile, ...sanitizeProfileInput(parsed.profile) };
+      const built = buildFiles({
+        url: target, mode: parsed.mode as DeliveryMode, profile: effective,
+        robots: page.robots, sitemap: page.sitemap, links: page.links, hasJsonLd: page.evidence.name === 'JSON-LD',
+      });
+      sendJson(res, 200, { files: built.files, missing: built.missing, prefill: page.profile, evidence: page.evidence, source: page.source });
+    } catch (err) {
+      console.error('[api/files]', err); // details stay in the server log, never in the response
+      sendJson(res, 500, { error: 'Could not build files for this site. Please try again.' });
     }
     return;
   }
@@ -190,5 +255,5 @@ const server = createServer(async (req, res) => {
 });
 
 server.listen(PORT, HOST, () => {
-  console.log(`Aperture bridge listening on http://${HOST}:${PORT}  (SPA + POST /api/scan, GET /api/robots?mode=)`);
+  console.log(`Aperture bridge listening on http://${HOST}:${PORT}  (SPA + POST /api/scan, POST /api/files, GET /api/robots?mode=)`);
 });
