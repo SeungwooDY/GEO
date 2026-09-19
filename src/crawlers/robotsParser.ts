@@ -95,8 +95,11 @@ export async function checkRobots(baseUrl: string, targetPath: string): Promise<
     // treated as not found below
   }
 
-  const groups = parseGroups(robotsTxt);
-  const perBot = AI_BOTS.map((bot) => evaluate(groups, bot.token, targetPath));
+  return { robotsTxtFound, targetPath, perBot: evaluateRobotsTxt(robotsTxt, targetPath) };
+}
 
-  return { robotsTxtFound, targetPath, perBot };
+/** Pure per-bot evaluation of robots.txt text, so generated files can be checked without a network fetch. */
+export function evaluateRobotsTxt(robotsTxt: string, targetPath: string): RobotsRuleResult[] {
+  const groups = parseGroups(robotsTxt);
+  return AI_BOTS.map((bot) => evaluate(groups, bot.token, targetPath));
 }

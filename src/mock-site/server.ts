@@ -21,11 +21,12 @@ User-agent: *
 Disallow: /admin
 `;
 
-const REAL_BUSINESS_HTML = `
+export const REAL_BUSINESS_HTML = `
   <h1>Riverside Plumbing Co.</h1>
   <p>Family-owned plumbing serving Riverside, CA since 1998. Emergency repairs, water heater
   installation, and drain cleaning. Licensed &amp; insured, CA lic #123456.</p>
   <p>Hours: Mon-Sat 7am-7pm. Call (951) 555-0142 for same-day service.</p>
+  <p>Visit us at 123 Main St, Riverside, CA 92501. Rated 4.8 out of 5 from 120 reviews.</p>
 `;
 
 function isAiBot(userAgent: string): boolean {

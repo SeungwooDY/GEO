@@ -4,7 +4,7 @@ import { extractVisibleText } from './htmlText.js';
 import type { ContentSignalsReport } from './types.js';
 
 // Heuristic: percentages, currency amounts, and counts with a unit ("25 years", "1,200 reviews").
-const STAT_PATTERN = /\$\s?\d[\d,.]*|\b\d[\d,.]*\s?(?:%|percent\b|years?\b|reviews?\b|customers?\b|clients?\b|projects?\b|jobs?\b)/gi;
+export const STAT_PATTERN =/\$\s?\d[\d,.]*|\b\d[\d,.]*\s?(?:%|percent\b|years?\b|reviews?\b|customers?\b|clients?\b|projects?\b|jobs?\b)/gi;
 
 /** Measures what a non-JS crawler can read: everything is computed from the raw HTML, not the rendered page. */
 export async function checkContentSignals(url: string, userAgent = BROWSER_USER_AGENT): Promise<ContentSignalsReport> {
