@@ -1,0 +1,24 @@
+# Render Blueprint: Aperture UI (static) + URL-diagnostics bridge (web service).
+# The UI calls relative /api/* paths, so the static site rewrites them to the bridge.
+services:
+  - type: web
+    name: aperture-web
+    runtime: static
+    branch: main
+    buildCommand: npm ci && npm run build
+    staticPublishPath: dist
+    routes:
+      # If "aperture-bridge" is taken, Render adds a suffix; update this URL to match.
+      - type: rewrite
+        source: /api/*
+        destination: https://aperture-bridge.onrender.com/api/*
+
+  - type: web
+    name: aperture-bridge
+    runtime: node
+    branch: main
+    # tsx is a devDependency, so install dev deps. Chromium powers the rendering-gap and
+    # per-bot checks; if its system libs are missing the bridge degrades those to { ok:false }.
+    buildCommand: npm ci --include=dev && npx playwright install chromium
+    startCommand: npx tsx server/bridge.ts
+    healthCheckPath: /api/robots?mode=mirror

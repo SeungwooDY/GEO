@@ -24,7 +24,10 @@ import { generateAiBotRobots } from '../src/generators/configGenerator.js';
 import { DELIVERY_MODES, type DeliveryMode } from '../src/mode.js';
 import type { CheckOutcome, DiagnosticReport } from '../src/crawlers/types.js';
 
-const PORT = Number(process.env.APERTURE_BRIDGE_PORT ?? 8787);
+// Hosts like Render inject PORT and require binding 0.0.0.0. Locally this still defaults to
+// 127.0.0.1:8787, which is where the Vite dev proxy expects the bridge.
+const PORT = Number(process.env.PORT ?? process.env.APERTURE_BRIDGE_PORT ?? 8787);
+const HOST = process.env.HOST ?? (process.env.PORT ? '0.0.0.0' : '127.0.0.1');
 
 /** Same failure isolation as runDiagnostics: one check failing becomes `{ ok:false }`, never a dead scan. */
 async function settle<T>(work: Promise<T>): Promise<CheckOutcome<T>> {
@@ -148,6 +151,6 @@ const server = createServer(async (req, res) => {
   sendJson(res, 404, { error: 'not found' });
 });
 
-server.listen(PORT, '127.0.0.1', () => {
-  console.log(`Aperture bridge listening on http://127.0.0.1:${PORT}  (POST /api/scan, GET /api/robots?mode=)`);
+server.listen(PORT, HOST, () => {
+  console.log(`Aperture bridge listening on http://${HOST}:${PORT}  (POST /api/scan, GET /api/robots?mode=)`);
 });
