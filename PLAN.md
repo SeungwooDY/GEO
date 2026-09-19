@@ -6,6 +6,16 @@
 
 ---
 
+## Hackathon scope
+
+This is a hackathon project; one track is **ANS integration**. That reprioritizes the roadmap for the event without changing the long-term sequencing below:
+
+- **Demo centerpiece:** the Phase 2 middleware's bot-identity verification, with ANS as the featured layer. Use the live ANS API to validate visiting agent traffic.
+- **The empty-registry problem is the demo narrative, not a blocker:** register our own demo agent in the ANS registry, have it visit the sandbox site, and show the middleware verifying it (cryptographic check passes) side-by-side with a spoofed agent using the same User-Agent string (check fails). A third lane — a real crawler UA verified via IP-range fallback — shows the layered design degrading gracefully.
+- **Build order for the event:** minimal middleware + verification utility first; diagnostics dashboard second (it's the product wrapper); everything else as time allows.
+
+---
+
 ## Sequencing logic (one line)
 
 Diagnostics-and-suggestions requires nothing from a vendor and validates demand fastest; the content/config generators are the shared engine both automation paths need; middleware is lower-trust and ships before the GitHub App, which needs a higher trust bar and vendor approval; real pilot businesses come last because they need something real to test.
@@ -54,6 +64,8 @@ This is where "suggestions" becomes "we made the change for you," for vendors wh
 
 - **Reality check on the segment:** local businesses mostly do not have GitHub repos — they're on WordPress, Wix, Squarespace, GoDaddy builders. A **WordPress plugin** (the Yoast playbook) reaches far more of this market than a GitHub App and has a lower trust bar than middleware. Evaluate plugin-first before committing to App-first.
 - **GitHub App** (targets agencies/dev shops managing many local sites, not individual businesses) — registered under our org, "Any account" install scope, minimal permission set (contents + pull_requests + metadata), webhook listener, installation-token auth, PR-based commits only (never direct-to-main), drawing on Phase 2's generators. Ships after Phase 2 — the App has nothing to commit without the generators.
+- **Architecture: the App is the identity wrapper; Claude is the engine.** The GitHub App provides authorship (PRs appear from our app), short-lived installation tokens, and webhooks. The actual edits are made by a Claude agent (Claude Agent SDK headless, or Anthropic Managed Agents with a `github_repository` mount) driven by our orchestrator. Flow: suggestion approved in dashboard → orchestrator mints an installation token → agent session clones the repo, makes edits on a branch, pushes, opens a PR via the GitHub API/MCP → PR is authored by our App.
+- **Instruction contract (change spec).** The suggestions engine's output IS the agent's input — don't pass free-text prompts. Each run gets a structured change spec (JSON): task list with `type` (add-jsonld | generate-llms-txt | robots-rules | rewrite-for-extraction), target paths/URLs, the structured business inputs (hours, services, area), and hard constraints. The orchestrator renders the spec into the agent's kickoff message; a stable system prompt carries the standing guardrails: branch + PR only (never push to default), minimal diffs, touch only files named in the spec, cloaking policy (same substance, cleaner format), and PR title/body conventions. Post-run validation (schema/JSON-LD validator + diff-scope check that only spec'd files changed) gates PR creation.
 - **Terms of Service + Privacy Policy** — required by GitHub before the App goes public; needed anyway given the pseudonymization commitment on the observability side.
 
 ## Phase 4 — Real-world validation loop
