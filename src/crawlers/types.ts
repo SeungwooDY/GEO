@@ -19,6 +19,13 @@ export interface UaDiffResult {
   textHash: string | null;
   substanceMismatch: boolean;
   blocked: boolean;
+  /**
+   * True when a WAF (e.g. Cloudflare) intercepted this probe with a challenge. Our probes are
+   * unverified by definition, so a challenge says nothing about how the real crawler is treated —
+   * not a block, not cloaking. Named per WAF vendor in `challengedBy` when identifiable.
+   */
+  challenged: boolean;
+  challengedBy: string | null;
   error: string | null;
 }
 
