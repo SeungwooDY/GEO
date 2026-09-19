@@ -8,10 +8,14 @@
     "demo": "tsx src/runDiagnostics.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "demo:proxy": "tsx src/runProxyDemo.ts"
+    "demo:proxy": "tsx src/runProxyDemo.ts",
+    "harness": "tsx --env-file=.env src/harness/main.ts",
+    "harness:smoke": "tsx --env-file=.env src/harness/smoke.ts",
+    "harness:pr-smoke": "tsx --env-file=.env src/harness/prSmoke.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.127.0",
+    "@octokit/app": "^16.1.4",
     "cheerio": "^1.0.0",
     "playwright": "^1.48.0",
     "zod": "^4.6.5"

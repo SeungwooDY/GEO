@@ -1,3 +1,8 @@
 node_modules/
 dist/
 snapshots/
+
+# GitHub App secrets and local run state
+.env
+*.pem
+data/
