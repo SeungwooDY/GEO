@@ -17,3 +17,15 @@ services:
       # native runtime doesn't persist the default ~/.cache/ms-playwright).
       - key: PLAYWRIGHT_BROWSERS_PATH
         value: "0"
+      # Secrets — values live in the Render dashboard (sync: false), never in this file.
+      # The GitHub App trio powers /api/repo-pr; the Anthropic key powers the gated
+      # framework-layout edit (JSON-LD) and the content judge.
+      - key: GITHUB_APP_ID
+        sync: false
+      - key: GITHUB_WEBHOOK_SECRET
+        sync: false
+      # Add the PEM as a Secret File named github-app.pem; Render mounts it here.
+      - key: GITHUB_APP_PRIVATE_KEY_PATH
+        value: /etc/secrets/github-app.pem
+      - key: ANTHROPIC_API_KEY
+        sync: false
