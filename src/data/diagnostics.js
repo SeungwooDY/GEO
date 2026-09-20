@@ -12,6 +12,8 @@
 const API = {
   scan: '/api/scan',
   files: '/api/files',
+  repoScan: '/api/repo-scan',
+  repoPr: '/api/repo-pr',
   robots: (mode) => `/api/robots?mode=${encodeURIComponent(mode)}`,
 }
 
@@ -45,6 +47,32 @@ export async function scanReport(url) {
     throw new Error(msg)
   }
   return res.json() // DiagnosticReport
+}
+
+// ---- repo scan: POST a GitHub URL to the bridge, get back a RepoScanReport
+// (six check cards + edit targets; shape matches src/repoScan/types.ts verbatim) ----
+export async function repoScanReport(url) {
+  // The landing input accepts "github.com/owner/repo"; the bridge requires the full https form.
+  const normalized = /^https?:\/\//i.test(url) ? url.replace(/^http:/i, 'https:') : `https://${url}`
+  const res = await post(API.repoScan, { url: normalized })
+  if (!res.ok) {
+    let msg = `repo scan failed (${res.status})`
+    try { const e = await res.json(); if (e?.error) msg = e.error } catch { /* keep default */ }
+    throw new Error(msg)
+  }
+  return res.json() // RepoScanReport
+}
+
+// ---- repo PR: POST { url, mode } -> the bridge scans the SUBMITTED repo, writes the config
+// files, and opens a PR there as the App. A 409 means the repo owner hasn't installed the App
+// yet; the response carries the install link so the UI can offer it.
+export async function repoPr(url, mode, profile) {
+  const normalized = /^https?:\/\//i.test(url) ? url.replace(/^http:/i, 'https:') : `https://${url}`
+  const res = await post(API.repoPr, { url: normalized, mode, profile })
+  const body = await res.json().catch(() => null)
+  if (res.status === 409 && body?.error === 'app-not-installed') return { needsInstall: true, ...body }
+  if (!res.ok) throw new Error(body?.error || `PR request failed (${res.status})`)
+  return { needsInstall: false, ...body }
 }
 
 // ---- real per-mode robots.txt from the engine (generateAiBotRobots), with a
