@@ -304,8 +304,12 @@ const server = createServer(async (req, res) => {
     let app;
     try {
       app = createGithubApp(loadHarnessConfig());
-    } catch {
-      sendJson(res, 503, { error: 'The GitHub App is not configured on this server.' });
+    } catch (err) {
+      // The loader's message only ever names missing/invalid KEYS (never values) — safe to surface,
+      // and it turns "not configured" from a guessing game into a checklist.
+      const problems = err instanceof Error ? err.message : String(err);
+      console.error('[api/repo-pr] config:', problems);
+      sendJson(res, 503, { error: 'The GitHub App is not configured on this server.', problems });
       return;
     }
 
