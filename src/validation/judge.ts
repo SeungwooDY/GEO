@@ -26,7 +26,7 @@ export interface Judge {
 }
 
 const PROMPT_VERSION = 'v1';
-export const DEFAULT_JUDGE_MODEL = 'claude-sonnet-5';
+export const DEFAULT_JUDGE_MODEL = 'claude-sonnet-4-6';
 
 const SYSTEM_PROMPT = `You check that a CANDIDATE text makes no claims beyond a SOURCE of truth.
 

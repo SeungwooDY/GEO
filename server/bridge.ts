@@ -8,11 +8,10 @@
  * engine's `DiagnosticReport` verbatim, plus the engine's per-mode robots.txt.
  *
  * Endpoints:
- *   POST /api/scan     { url }        -> DiagnosticReport
- *   POST /api/files    { url, mode, profile? } -> suggested files (robots merge, sitemap, JSON-LD, llms.txt, markdown)
+ *   POST /api/scan      { url }        -> DiagnosticReport
+ *   POST /api/files     { url, mode, profile? } -> suggested files (robots merge, sitemap, JSON-LD, llms.txt, markdown)
+ *   POST /api/repo-scan { url }        -> RepoScanReport (GitHub repo pattern scan: checks + edit targets)
  *   GET  /api/robots?mode=amplify     -> text/plain robots.txt section (real, mode-only)
- *
- * URL-only by design. There is no GitHub path here — the engine has none.
  */
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { readFile } from 'node:fs/promises';
@@ -29,6 +28,12 @@ import type { CheckOutcome, DiagnosticReport } from '../src/crawlers/types.js';
 import { checkPublicHost } from './guard.js';
 import { fetchExtract, type PageExtract } from './extract.js';
 import { buildFiles, sanitizeProfileInput } from './files.js';
+import { resolveRepo, scanRepo } from '../src/repoScan/scan.js';
+import { loadHarnessConfig } from '../src/harness/config.js';
+import { createGithubApp, prepareRepoDelivery } from '../src/harness/github.js';
+import { deliverChange } from '../src/harness/deliver.js';
+import { branchNameFor } from '../src/harness/git.js';
+import { applyRepoFix, describeFix, type RepoFixSummary } from '../src/harness/repoFix.js';
 
 // Render (and most hosts) inject PORT and require binding 0.0.0.0. Falls back to
 // 8787 locally, where `npm run dev` (Vite) proxies /api here.
@@ -235,12 +240,113 @@ const server = createServer(async (req, res) => {
       const effective = { ...page.profile, ...sanitizeProfileInput(parsed.profile) };
       const built = buildFiles({
         url: target, mode: parsed.mode as DeliveryMode, profile: effective,
-        robots: page.robots, sitemap: page.sitemap, links: page.links, hasJsonLd: page.evidence.name === 'JSON-LD',
+        robots: page.robots, sitemap: page.sitemap, llms: page.llms, links: page.links, hasJsonLd: page.evidence.name === 'JSON-LD',
       });
       sendJson(res, 200, { files: built.files, missing: built.missing, prefill: page.profile, evidence: page.evidence, source: page.source });
     } catch (err) {
       console.error('[api/files]', err); // details stay in the server log, never in the response
       sendJson(res, 500, { error: 'Could not build files for this site. Please try again.' });
+    }
+    return;
+  }
+
+  if (method === 'POST' && url.pathname === '/api/repo-scan') {
+    let parsed: { url?: unknown };
+    try {
+      parsed = JSON.parse((await readBody(req)) || '{}');
+    } catch {
+      sendJson(res, 400, { error: 'invalid JSON body' });
+      return;
+    }
+    // Network callers may only name public GitHub repos — never local paths (resolveRepo would
+    // happily scan any directory on this machine, which is fine for the CLI, not for HTTP).
+    const raw = typeof parsed.url === 'string' ? parsed.url.trim() : '';
+    if (!/^https:\/\/(www\.)?github\.com\/[\w.-]+\/[\w.-]+\/?$/.test(raw)) {
+      sendJson(res, 400, { error: 'a public GitHub repository URL is required (https://github.com/owner/repo)' });
+      return;
+    }
+    try {
+      const { path, cleanup } = resolveRepo(raw.replace(/\/$/, ''));
+      try {
+        sendJson(res, 200, scanRepo(path, raw));
+      } finally {
+        cleanup();
+      }
+    } catch (err) {
+      console.error('[api/repo-scan]', err); // clone/scan details stay in the server log
+      sendJson(res, 500, { error: 'Could not clone or scan that repository. Is it public?' });
+    }
+    return;
+  }
+
+  if (method === 'POST' && url.pathname === '/api/repo-pr') {
+    let parsed: { url?: unknown; mode?: unknown; profile?: unknown };
+    try {
+      parsed = JSON.parse((await readBody(req)) || '{}');
+    } catch {
+      sendJson(res, 400, { error: 'invalid JSON body' });
+      return;
+    }
+    const raw = typeof parsed.url === 'string' ? parsed.url.trim().replace(/\/$/, '') : '';
+    const m = raw.match(/^https:\/\/(?:www\.)?github\.com\/([\w.-]+)\/([\w.-]+?)(?:\.git)?$/);
+    if (!m) {
+      sendJson(res, 400, { error: 'a public GitHub repository URL is required (https://github.com/owner/repo)' });
+      return;
+    }
+    if (!DELIVERY_MODES.includes(parsed.mode as DeliveryMode)) {
+      sendJson(res, 400, { error: `mode must be one of ${DELIVERY_MODES.join(', ')}` });
+      return;
+    }
+    const [, owner, name] = m;
+    const mode = parsed.mode as DeliveryMode;
+
+    // The App credentials are optional for the rest of the bridge; this endpoint needs them.
+    let app;
+    try {
+      app = createGithubApp(loadHarnessConfig());
+    } catch {
+      sendJson(res, 503, { error: 'The GitHub App is not configured on this server.' });
+      return;
+    }
+
+    // The PR goes into the SUBMITTED repo. The App must be installed there — that installation is the
+    // repo owner's consent, so "not installed" is a first-class response with the install link, not a failure.
+    let delivery;
+    try {
+      delivery = await prepareRepoDelivery(app, owner, name);
+    } catch {
+      const { data: self } = await app.octokit.request('GET /app').catch(() => ({ data: null as { slug?: string } | null }));
+      sendJson(res, 409, {
+        error: 'app-not-installed',
+        message: `The Aperture App isn't installed on ${owner}/${name} yet. Install it (choosing that repository), then try again.`,
+        installUrl: self?.slug ? `https://github.com/apps/${self.slug}/installations/new` : null,
+      });
+      return;
+    }
+
+    try {
+      let summary: RepoFixSummary | null = null;
+      const result = await deliverChange({
+        remoteUrl: delivery.remoteUrl,
+        auth: delivery.auth,
+        baseBranch: delivery.baseBranch,
+        branch: branchNameFor(['config', mode]),
+        apply: async (dir) => { summary = await applyRepoFix(dir, mode, parsed.profile); },
+        commitMessage: `Aperture: AI crawler config (${mode})`,
+        get pr() { return describeFix(summary as unknown as RepoFixSummary, mode); },
+        client: delivery.client,
+        author: delivery.author,
+      });
+      const s = summary as unknown as RepoFixSummary | null;
+      sendJson(res, 200, {
+        status: result.status,
+        pr: 'pr' in result ? result.pr : null,
+        written: s?.written ?? [],
+        skipped: s?.skipped ?? [],
+      });
+    } catch (err) {
+      console.error('[api/repo-pr]', err); // clone/push details stay in the server log
+      sendJson(res, 500, { error: 'Could not open the pull request. Check the server log.' });
     }
     return;
   }

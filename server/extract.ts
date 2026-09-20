@@ -24,6 +24,7 @@ export interface PageExtract extends PageFacts {
   source: 'raw' | 'rendered' | 'unreadable';
   robots: FileState;
   sitemap: FileState;
+  llms: FileState;
 }
 
 const SKIP_EXT = /\.(pdf|jpe?g|png|gif|webp|svg|ico|css|js|json|xml|zip|mp4|mp3|woff2?|ttf|otf|txt)$/i;
@@ -188,14 +189,18 @@ export async function fetchSiteFile(origin: string, path: string, looksValid: (t
 
 export const looksLikeRobots = (t: string) => /(user-agent|disallow|allow|sitemap)\s*:/i.test(t);
 export const looksLikeSitemap = (t: string) => /<(urlset|sitemapindex)[\s>]/i.test(t);
+// llms.txt is freeform text; the check that matters is rejecting an SPA's index.html served as a
+// 200 fallback for every unknown path — which would otherwise read as "found".
+export const looksLikeLlms = (t: string) => t.trim().length > 0 && !/<(!doctype|html|head|script)[\s>]/i.test(t);
 
-/** Reads the page (raw first, headless render if it's a JS shell), then the site's existing robots.txt and sitemap.xml. */
+/** Reads the page (raw first, headless render if it's a JS shell), then the site's existing robots.txt, sitemap.xml and llms.txt. */
 export async function fetchExtract(url: string): Promise<PageExtract> {
   const origin = new URL(url).origin;
-  const [raw, robots, sitemap] = await Promise.all([
+  const [raw, robots, sitemap, llms] = await Promise.all([
     get(url),
     fetchSiteFile(origin, '/robots.txt', looksLikeRobots),
     fetchSiteFile(origin, '/sitemap.xml', looksLikeSitemap),
+    fetchSiteFile(origin, '/llms.txt', looksLikeLlms),
   ]);
 
   let html = raw && raw.status < 400 ? raw.text : '';
@@ -213,5 +218,5 @@ export async function fetchExtract(url: string): Promise<PageExtract> {
   }
 
   const facts = html ? parsePage(html, url) : { profile: { url: `${origin}/` } as Partial<BusinessProfile>, evidence: {}, links: [`${origin}/`] };
-  return { ...facts, source, robots, sitemap };
+  return { ...facts, source, robots, sitemap, llms };
 }

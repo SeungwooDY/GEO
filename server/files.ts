@@ -167,6 +167,8 @@ export interface BuildInput {
   profile: Partial<BusinessProfile>;
   robots: FileState;
   sitemap: FileState;
+  /** The site's current /llms.txt, when readable — lets the report acknowledge it instead of claiming it's missing. */
+  llms?: FileState;
   links: string[];
   /** Whether the page already carries JSON-LD (so we can say we're replacing it). */
   hasJsonLd?: boolean;
@@ -230,13 +232,13 @@ export function buildFiles(input: BuildInput): { files: SuggestedFile[]; profile
 
   // 3-5. files that state business facts: only with a valid profile
   const factFile = (
-    id: string, name: string, kind: FileKind, why: string, howTo: string, build: (p: BusinessProfile) => string, onlyIn: DeliveryMode[], note?: string,
+    id: string, name: string, kind: FileKind, why: string, howTo: string, build: (p: BusinessProfile) => string, onlyIn: DeliveryMode[], note?: string, existing: string | null = null,
   ): SuggestedFile => {
     if (!onlyIn.includes(mode)) {
-      return skipped(id, name, kind, mode === 'cloak' ? 'Not part of Cloak: nothing is served to AI.' : 'Amplify only: Mirror shows AI exactly what a person sees.', howTo);
+      return skipped(id, name, kind, mode === 'cloak' ? 'Not part of Cloak: nothing is served to AI.' : 'Amplify only: Mirror shows AI exactly what a person sees.', howTo, existing);
     }
-    if (!profile) return { id, name, kind, status: 'needs-facts', why, howTo, content: '', existing: null, missing };
-    return { id, name, kind, status: 'ready', why, howTo, content: build(profile), existing: null, missing: [], warning: note };
+    if (!profile) return { id, name, kind, status: 'needs-facts', why, howTo, content: '', existing, missing };
+    return { id, name, kind, status: 'ready', why, howTo, content: build(profile), existing, missing: [], warning: note };
   };
 
   files.push(factFile(
@@ -247,11 +249,16 @@ export function buildFiles(input: BuildInput): { files: SuggestedFile[]; profile
     ['mirror', 'amplify'],
     input.hasJsonLd ? 'Your page already has JSON-LD. Replace it with this block rather than adding a second one.' : undefined,
   ));
+  const existingLlms = input.llms?.state === 'found' ? input.llms.text : null;
   files.push(factFile(
     'llms', 'llms.txt', 'text',
-    'A short plain-text summary for AI readers. Free to add, though no major crawler is known to honor it yet.',
+    existingLlms
+      ? 'Your site already serves /llms.txt — good. This version is rebuilt from the details above.'
+      : 'A short plain-text summary for AI readers. Free to add, though no major crawler is known to honor it yet.',
     'Upload to your site root so it is served at /llms.txt.',
     generateLlmsTxt, ['amplify'],
+    undefined,
+    existingLlms,
   ));
   files.push(factFile(
     'markdown', 'business.md', 'markdown',

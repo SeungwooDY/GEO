@@ -4,6 +4,7 @@ import { ORDER, MODES } from './modes'
 import { GitHubIcon, LinkIcon, ArrowIcon } from './icons'
 import Aperture from './Aperture'
 import Report from './Report'
+import RepoReport from './report/RepoReport'
 import Mission from './Mission'
 import About from './About'
 import { scramble } from './scramble'
@@ -42,7 +43,7 @@ function isValidTarget(source, raw) {
 export default function Landing() {
   const [stage, setStage] = useState('enter')   // enter -> aperture -> analysis
   const [mode, setMode] = useState('mirror')
-  const [source, setSource] = useState('url')     // URL-only: GitHub analysis isn't wired to the engine yet
+  const [source, setSource] = useState('url')     // 'url' scans the live site; 'github' pattern-scans the repo via /api/repo-scan
   const [value, setValue] = useState('')
   const [cfgTab, setCfgTab] = useState('robots')
   const [robotsText, setRobotsText] = useState(null)  // real per-mode robots.txt from the engine
@@ -161,6 +162,7 @@ export default function Landing() {
 
   // The report is a full-width scrolling page, so it renders outside the centered stage wrapper.
   if (stage === 'analysis') {
+    if (source === 'github') return <RepoReport url={value.trim()} mode={mode} onBack={() => setStage('aperture')} />
     return <Report url={value} mode={mode} onBack={() => setStage('aperture')} />
   }
 
@@ -181,17 +183,21 @@ export default function Landing() {
               <p className="home-desc" ref={promptRef}>Point your site to Aperture.</p>
               <form className="input-row home-input" ref={inputRef} onSubmit={startAnalyze}>
                 <div className="src-toggle">
-                  <button type="button" className="disabled" disabled aria-disabled="true" title="GitHub analysis — coming soon" aria-label="GitHub repository (coming soon)"><GitHubIcon /></button>
-                  <button type="button" className="active" aria-label="Website URL"><LinkIcon /></button>
+                  <button type="button" className={source === 'github' ? 'active' : ''} onClick={() => setSource('github')}
+                    title="Analyze a GitHub repository" aria-label="GitHub repository" aria-pressed={source === 'github'}><GitHubIcon /></button>
+                  <button type="button" className={source === 'url' ? 'active' : ''} onClick={() => setSource('url')}
+                    title="Analyze a live site" aria-label="Website URL" aria-pressed={source === 'url'}><LinkIcon /></button>
                 </div>
                 <input value={value} onChange={(e) => setValue(e.target.value)} autoFocus
-                  placeholder="https://your-site.com" />
+                  placeholder={source === 'github' ? 'https://github.com/owner/repo' : 'https://your-site.com'} />
                 <button className={`go ${valid ? 'lit' : ''}`} type="submit" aria-label="Analyze" disabled={!valid}><ArrowIcon /></button>
               </form>
               {value.trim() && !valid && (
-                <p className="input-err mono">Enter a valid site URL — https://example.com</p>
+                <p className="input-err mono">
+                  {source === 'github' ? 'Enter a GitHub repository — https://github.com/owner/repo' : 'Enter a valid site URL — https://example.com'}
+                </p>
               )}
-              <p className="src-hint mono">GitHub repo analysis — coming soon.</p>
+              <p className="src-hint mono">Scan a live site, or a GitHub repo straight from its source.</p>
             </div>
           </div>
         </section>
