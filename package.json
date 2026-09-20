@@ -20,7 +20,8 @@
     "test": "vitest run",
     "harness": "tsx --env-file=.env src/harness/main.ts",
     "harness:smoke": "tsx --env-file=.env src/harness/smoke.ts",
-    "harness:pr-smoke": "tsx --env-file=.env src/harness/prSmoke.ts"
+    "harness:pr-smoke": "tsx --env-file=.env src/harness/prSmoke.ts",
+    "model:ping": "tsx --env-file=.env src/agent/ping.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.127.0",
